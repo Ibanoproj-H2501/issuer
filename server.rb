@@ -5,6 +5,7 @@ require 'openssl'
 
 require_relative 'root.rb'
 require_relative 'openid_credential_issuer.rb'
+require_relative 'oauth_authrization_server'
 
 
 set :bind, '0.0.0.0'
@@ -23,4 +24,13 @@ end
 
 get '/.well-known/openid-credential-issuer' do
   response_possible_credentials
+end
+
+get '/.well-known' do
+  response_possible_credentials
+end
+
+get '/.well-known/oauth-authorization-server' do
+  # redirect "https://oauth-mock.mock.beeceptor.com/oauth/authorize"
+  response_oauth_authorization
 end
