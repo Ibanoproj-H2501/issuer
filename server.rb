@@ -4,13 +4,15 @@ require 'webrick/https'
 require 'openssl'
 
 require_relative 'root.rb'
-require_relative 'openid_credential_issuer.rb'
-require_relative 'oauth_authrization_server'
+require_relative 'issuer_advertisement'
+require_relative 'oauth_mock'
+
 
 
 set :bind, '0.0.0.0'
 set :port, 5000
 set :environment, :production
+set :logging, true
 
 set :server_settings,
   SSLEnable: true,
@@ -23,14 +25,37 @@ get '/' do
 end
 
 get '/.well-known/openid-credential-issuer' do
-  response_possible_credentials
-end
+  content_type :json
 
-get '/.well-known' do
-  response_possible_credentials
+  credential_advertisement
 end
 
 get '/.well-known/oauth-authorization-server' do
-  # redirect "https://oauth-mock.mock.beeceptor.com/oauth/authorize"
-  response_oauth_authorization
+  content_type :json
+
+  oauth_server_advertisement
 end
+
+post '/pushed_authorization' do
+  content_type :json
+
+  pushed_authorization_mock
+end
+
+get '/mock/authorization' do
+  logger.info 'Authorization mock callback triggered'
+  logger.info "Received state: #{params['state']}"
+  logger.info "All params: #{params}"
+
+  redirect url_back_to_wallet_mock(params['state'])
+end
+
+post '/mock/token' do
+  logger.info "TOKEN REQUEST PARAMS: #{params}"
+  logger.info "TOKEN HEADERS: #{request.env.select { |k,_| k.start_with?('HTTP_') }}"
+
+  content_type :json
+
+  access_token_mock
+end
+
