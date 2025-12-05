@@ -2,6 +2,10 @@ require 'sinatra'
 require 'webrick'
 require 'webrick/https'
 require 'openssl'
+require "json"
+require "jwt"
+require "base64"
+require "securerandom"
 
 require_relative 'root.rb'
 require_relative 'issuer_advertisement'
@@ -59,3 +63,132 @@ post '/mock/token' do
   access_token_mock
 end
 
+# post '/credential' do
+#   content_type :json
+#   '{
+#   "iss": "https://bpissuer.dev:5000",
+#   "iat": 1733400000,
+#   "exp": 1733400000 + 90*24*60*60,
+#   "vct": "urn:eudi:pid:1",
+#   "cnf": {
+#     "jwk": { /* holder public key bound in the wallet */ }
+#   },
+#   "family_name": "ExampleFamily",
+#   "given_name": "ExampleGiven"
+# }
+# '
+# end
+
+ISSUER = "https://bpissuer.dev"
+VCT    = "https://bpissuer.dev"
+
+# Use a stable EC key in real deployment
+ISSUER_KEY = OpenSSL::PKey::EC.generate("prime256v1")
+
+helpers do
+  def base64url(data)
+    Base64.urlsafe_encode64(data).delete("=")
+  end
+
+  # Build one disclosure for a claim
+  # Returns [disclosure_b64url, digest_b64url]
+  def build_disclosure(name, value)
+    salt = SecureRandom.urlsafe_base64(16)
+    disclosure_array = [salt, name, value]
+    json = disclosure_array.to_json
+
+    digest = OpenSSL::Digest::SHA256.digest(json)
+    digest_b64 = base64url(digest)
+    disclosure_b64 = base64url(json)
+
+    [disclosure_b64, digest_b64]
+  end
+end
+
+post "/credential" do
+  content_type :json
+
+  # 1. Validate access token and authorization details here
+  # token = request.env["HTTP_AUTHORIZATION"]&.sub(/^Bearer /, "")
+  # halt 401 unless valid_token?(token)
+
+  # 2. Extract or look up subject and wallet public key (JWK)
+  # In reality this JWK comes from the proof in the credential request
+  wallet_jwk = {
+    kty: "EC",
+    crv: "P-256",
+    x:   "base64url_x_value",
+    y:   "base64url_y_value"
+  }
+
+  # 3. Fetch data from your data source for this user
+  # Here we hard code an example
+  employee_data = {
+    "given_name"   => "John",
+    "family_name"  => "Doe",
+    # "birthdate"    => "1990-03-12",
+    # "employee_id"  => "12345",
+    # "employer"     => "Buypass",
+    # "role"         => "Engineer"
+  }
+
+  # Choose which claims are selectively disclosable
+  # disclosable = %w[given_name family_name birthdate role]
+  #
+  # disclosures = []
+  # sd_digests  = []
+  #
+  # disclosable.each do |claim|
+  #   disclosure_b64, digest_b64 = build_disclosure(claim, employee_data[claim])
+  #   disclosures << disclosure_b64
+  #   sd_digests  << digest_b64
+  # end
+
+  # 4. Build SD JWT payload
+  now = Time.now.to_i
+
+  payload = {
+    iss: ISSUER,
+    iat: now,
+    exp: now + 3600 * 24 * 365,
+    vct: VCT,
+    cnf: { jwk: wallet_jwk },
+    employee_id: employee_data["employee_id"],
+    employer: employee_data["employer"],
+    # _sd: sd_digests
+  }
+
+  header = {
+    alg: "ES256",
+    typ: "vc+sd-jwt"
+  }
+
+  sd_jwt = JWT.encode(payload, ISSUER_KEY, "ES256", header)
+
+  # 5. Combine SD JWT plus disclosures into one credential string
+  # combined_credential = ([sd_jwt] + disclosures).join("~")
+
+  # 6. Return OID4VCI credential response
+  # response_body = {
+  #   credentials: [
+  #     {
+  #       credential: combined_credential
+  #     }
+  #   ]
+  # }
+  #
+  # JSON.pretty_generate(response_body)
+  # sd_jwt
+  response_body = {
+    credentials: [
+      {
+        credential: sd_jwt
+      }
+    ]
+  }
+
+  json_response = JSON.pretty_generate(response_body)
+
+  logger.info json_response
+  json_response
+end
